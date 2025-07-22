@@ -34,9 +34,7 @@ class ConnectionManager:
 
     async def send_message(self, message: str):
         """Send message to all connected clients"""
-        for connection in self.active_connections[
-            :
-        ]:  # Copy list to avoid modification during iteration
+        for connection in self.active_connections[:]:
             try:
                 await connection.send_text(message)
             except Exception:
