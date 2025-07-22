@@ -38,7 +38,7 @@ function AlertComponent({ alert, onDismiss }: { alert: Alert; onDismiss: (id: st
 
 function TestBotCreation() {
   const [meetingUrl, setMeetingUrl] = useState("");
-  const [result, setResult] = useState(null);
+  const [result, setResult] = useState<any>(null);
 
   const createBot = async () => {
     try {
@@ -50,7 +50,7 @@ function TestBotCreation() {
       const data = await response.json();
       setResult(data);
     } catch (error) {
-      setResult({ error: error.message });
+      setResult({ error: error instanceof Error ? error.message : 'An error occurred' });
     }
   };
 
