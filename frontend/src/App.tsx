@@ -90,7 +90,23 @@ function App() {
   // WebSocket connection management
   useEffect(() => {
     const connectWebSocket = () => {
-      const wsUrl = API_BASE_URL.replace('http', 'ws') + '/ws/alerts';
+      // Get the base URL and construct WebSocket URL
+      const baseUrl = API_BASE_URL;
+      
+      // Handle both development and production environments
+      let wsUrl: string;
+      
+      if (baseUrl.startsWith('https://')) {
+        // Production: Use wss:// for secure WebSocket
+        wsUrl = baseUrl.replace('https://', 'wss://') + '/ws/alerts';
+      } else if (baseUrl.startsWith('http://')) {
+        // Development: Use ws:// for non-secure WebSocket
+        wsUrl = baseUrl.replace('http://', 'ws://') + '/ws/alerts';
+      } else {
+        // Fallback
+        wsUrl = 'ws://localhost:8000/ws/alerts';
+      }
+      
       console.log('Connecting to WebSocket:', wsUrl);
       
       ws.current = new WebSocket(wsUrl);
@@ -106,7 +122,6 @@ function App() {
           console.log('WebSocket message received:', message);
 
           if (message.type === 'silence_alert') {
-            // Add new alert
             const newAlert: Alert = {
               id: `${message.participant_id}-${Date.now()}`,
               participant: message.participant,

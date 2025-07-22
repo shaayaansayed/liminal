@@ -15,8 +15,6 @@ dotenv.load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Track participant speaking times and names
-# Format: {participant_id: {"timestamp": datetime, "name": str}}
 participant_speaking_times: Dict[str, Dict] = {}
 
 
