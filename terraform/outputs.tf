@@ -19,6 +19,21 @@ output "cloudwatch_log_group_name" {
   value       = aws_cloudwatch_log_group.app.name
 }
 
+output "backend_cloudfront_domain_name" {
+  description = "Domain name of the backend CloudFront distribution"
+  value       = aws_cloudfront_distribution.backend.domain_name
+}
+
+output "backend_cloudfront_distribution_id" {
+  description = "ID of the backend CloudFront distribution"
+  value       = aws_cloudfront_distribution.backend.id
+}
+
+output "backend_url" {
+  description = "Backend URL (via CloudFront)"
+  value       = "https://${aws_cloudfront_distribution.backend.domain_name}"
+}
+
 # Frontend outputs
 output "frontend_s3_bucket_name" {
   description = "Name of the S3 bucket for frontend"
