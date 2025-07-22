@@ -202,6 +202,10 @@ resource "aws_ecs_task_definition" "app" {
         {
           name  = "ENVIRONMENT"
           value = var.environment
+        },
+        {
+          name  = "RECALL_WEBHOOK_URL"
+          value = "https://${aws_cloudfront_distribution.backend.domain_name}/webhooks/recall"
         }
       ]
 
