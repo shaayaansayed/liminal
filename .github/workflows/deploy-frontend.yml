@@ -8,8 +8,8 @@ on:
 env:
   AWS_REGION: us-east-1
   S3_BUCKET: liminal-frontend-prod
-  CLOUDFRONT_DISTRIBUTION_ID: E109QVYY0ZMF3J
-  BACKEND_URL: http://liminal-prod-849734779.us-east-1.elb.amazonaws.com
+  CLOUDFRONT_DISTRIBUTION_ID: EZ5I0IA7FDIEQ
+  BACKEND_URL: https://d10pb6psjdd9k3.cloudfront.net
 
 jobs:
   deploy:
