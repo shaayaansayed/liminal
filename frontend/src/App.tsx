@@ -1,158 +1,191 @@
-import { useState, useEffect } from "react";
-import reactLogo from "./assets/react.svg";
-import viteLogo from "/vite.svg";
-import { apiClient, API_BASE_URL } from "./config/api";
+import { useState, useEffect, useRef } from "react";
+import { API_BASE_URL } from "./config/api";
 
-interface User {
-  id: number;
-  name: string;
-  email: string;
-}
-
-interface ApiResponse {
-  users: User[];
-}
-
-interface HealthResponse {
-  status: string;
+interface Alert {
+  id: string;
+  participant: string;
+  participant_id: string;
+  silent_duration: number;
   timestamp: string;
 }
 
-function App() {
-  const [count, setCount] = useState(0);
-  const [users, setUsers] = useState<User[]>([]);
-  const [healthStatus, setHealthStatus] = useState<HealthResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+function AlertComponent({ alert, onDismiss }: { alert: Alert; onDismiss: (id: string) => void }) {
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      onDismiss(alert.id);
+    }, 5000); // Auto-dismiss after 5 seconds
 
-  // Function to test API connection
-  const testApiConnection = async () => {
-    setLoading(true);
-    setError(null);
+    return () => clearTimeout(timer);
+  }, [alert.id, onDismiss]);
 
+  return (
+    <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-2 shadow-lg">
+      <div className="flex justify-between items-center">
+        <div>
+          <strong className="font-bold">🔇 Silence Alert!</strong>
+          <span className="block sm:inline"> {alert.participant} hasn't spoken for {alert.silent_duration} seconds</span>
+        </div>
+        <button 
+          onClick={() => onDismiss(alert.id)}
+          className="text-red-500 hover:text-red-700 font-bold text-lg"
+        >
+          ×
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TestBotCreation() {
+  const [meetingUrl, setMeetingUrl] = useState("");
+  const [result, setResult] = useState(null);
+
+  const createBot = async () => {
     try {
-      const health = (await apiClient.getHealth()) as HealthResponse;
-      setHealthStatus(health);
-
-      const response = (await apiClient.getUsers()) as ApiResponse;
-      setUsers(response.users);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to connect to API");
-      console.error("API Error:", err);
-    } finally {
-      setLoading(false);
+      const response = await fetch(`${API_BASE_URL}/api/create-bot`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ meeting_url: meetingUrl })
+      });
+      const data = await response.json();
+      setResult(data);
+    } catch (error) {
+      setResult({ error: error.message });
     }
   };
 
-  // Test API on component mount
+  return (
+    <div className="bg-gray-50 dark:bg-gray-800/50 p-6 rounded-lg mb-6">
+      <h2 className="text-xl font-semibold mb-4">Test Bot Creation</h2>
+      <div className="mb-4">
+        <input 
+          value={meetingUrl} 
+          onChange={(e) => setMeetingUrl(e.target.value)}
+          placeholder="Zoom meeting URL" 
+          className="w-full p-3 border border-gray-300 rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+        />
+      </div>
+      <button 
+        onClick={createBot}
+        className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors mb-4"
+      >
+        Create Bot
+      </button>
+      {result && (
+        <div className="mt-4">
+          <pre className="bg-gray-900 text-white p-4 rounded-lg overflow-auto text-left text-sm">
+            {JSON.stringify(result, null, 2)}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function App() {
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [wsStatus, setWsStatus] = useState<string>("Disconnected");
+  const ws = useRef<WebSocket | null>(null);
+
+  // WebSocket connection management
   useEffect(() => {
-    testApiConnection();
+    const connectWebSocket = () => {
+      const wsUrl = API_BASE_URL.replace('http', 'ws') + '/ws/alerts';
+      console.log('Connecting to WebSocket:', wsUrl);
+      
+      ws.current = new WebSocket(wsUrl);
+
+      ws.current.onopen = () => {
+        console.log('WebSocket connected');
+        setWsStatus("Connected");
+      };
+
+      ws.current.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          console.log('WebSocket message received:', message);
+
+          if (message.type === 'silence_alert') {
+            // Add new alert
+            const newAlert: Alert = {
+              id: `${message.participant_id}-${Date.now()}`,
+              participant: message.participant,
+              participant_id: message.participant_id,
+              silent_duration: message.silent_duration,
+              timestamp: message.timestamp
+            };
+            
+            setAlerts(prev => [...prev, newAlert]);
+            console.log('Silence alert added:', newAlert);
+          }
+        } catch (error) {
+          console.error('Error parsing WebSocket message:', error);
+        }
+      };
+
+      ws.current.onclose = () => {
+        console.log('WebSocket disconnected');
+        setWsStatus("Disconnected");
+        
+        // Reconnect after 3 seconds
+        setTimeout(() => {
+          console.log('Attempting to reconnect...');
+          connectWebSocket();
+        }, 3000);
+      };
+
+      ws.current.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        setWsStatus("Error");
+      };
+    };
+
+    connectWebSocket();
+
+    // Cleanup on component unmount
+    return () => {
+      if (ws.current) {
+        ws.current.close();
+      }
+    };
   }, []);
 
+  const dismissAlert = (alertId: string) => {
+    setAlerts(prev => prev.filter(alert => alert.id !== alertId));
+  };
+
   return (
-    <div className="max-w-5xl mx-auto p-8 text-center">
-      <div className="flex justify-center items-center gap-8 mb-8">
-        <a href="https://vite.dev" target="_blank" className="block">
-          <img
-            src={viteLogo}
-            className="h-24 p-6 transition-all duration-300 hover:drop-shadow-[0_0_2em_#646cffaa] hover:animate-spin"
-            alt="Vite logo"
-          />
-        </a>
-        <a href="https://react.dev" target="_blank" className="block">
-          <img
-            src={reactLogo}
-            className="h-24 p-6 transition-all duration-300 hover:drop-shadow-[0_0_2em_#61dafbaa] animate-spin"
-            alt="React logo"
-            style={{ animation: "spin 20s linear infinite" }}
-          />
-        </a>
+    <div className="max-w-5xl mx-auto p-8">
+      {/* WebSocket Status */}
+      <div className="mb-4 text-sm">
+        <span className={`inline-block px-2 py-1 rounded ${
+          wsStatus === 'Connected' ? 'bg-green-100 text-green-800' :
+          wsStatus === 'Error' ? 'bg-red-100 text-red-800' :
+          'bg-gray-100 text-gray-800'
+        }`}>
+          WebSocket: {wsStatus}
+        </span>
       </div>
 
-      <h1 className="text-5xl font-bold leading-tight mb-8">Vite + React</h1>
-
-      <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg mb-6">
-        <h3 className="text-lg font-semibold mb-2">API Configuration</h3>
-        <p className="text-sm text-gray-600 dark:text-gray-400">
-          Backend URL:{" "}
-          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-            {API_BASE_URL}
-          </code>
-        </p>
-      </div>
-
-      {/* API Status */}
-      <div className="bg-gray-50 dark:bg-gray-800/50 p-6 rounded-lg mb-6">
-        <h3 className="text-xl font-semibold mb-4">Backend API Status</h3>
-
-        {loading && (
-          <div className="text-blue-600 dark:text-blue-400">Loading...</div>
-        )}
-
-        {error && (
-          <div className="text-red-600 dark:text-red-400 mb-4">
-            <strong>Error:</strong> {error}
-          </div>
-        )}
-
-        {healthStatus && (
-          <div className="text-green-600 dark:text-green-400 mb-4">
-            <strong>✓ Backend is healthy!</strong>
-            <div className="text-sm mt-1">
-              Last checked: {new Date(healthStatus.timestamp).toLocaleString()}
-            </div>
-          </div>
-        )}
-
-        <button
-          onClick={testApiConnection}
-          disabled={loading}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-        >
-          {loading ? "Testing..." : "Test API Connection"}
-        </button>
-      </div>
-
-      {/* Users List */}
-      {users.length > 0 && (
-        <div className="bg-gray-50 dark:bg-gray-800/50 p-6 rounded-lg mb-6">
-          <h3 className="text-xl font-semibold mb-4">Users from Backend</h3>
-          <div className="grid gap-4 md:grid-cols-3">
-            {users.map((user) => (
-              <div
-                key={user.id}
-                className="bg-white dark:bg-gray-700 p-4 rounded-lg shadow"
-              >
-                <h4 className="font-semibold">{user.name}</h4>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                  {user.email}
-                </p>
-              </div>
-            ))}
-          </div>
+      {/* Alerts Container */}
+      {alerts.length > 0 && (
+        <div className="mb-6">
+          <h3 className="text-lg font-semibold mb-2">🚨 Active Alerts</h3>
+          {alerts.map(alert => (
+            <AlertComponent 
+              key={alert.id} 
+              alert={alert} 
+              onDismiss={dismissAlert}
+            />
+          ))}
         </div>
       )}
 
-      {/* Original Counter */}
-      <div className="p-8 bg-gray-100 dark:bg-gray-800 rounded-lg mb-8">
-        <button
-          onClick={() => setCount((count) => count + 1)}
-          className="px-6 py-3 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-lg border border-transparent font-medium transition-colors duration-250 hover:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/50"
-        >
-          count is {count}
-        </button>
-        <p className="mt-4 text-gray-600 dark:text-gray-400">
-          Edit{" "}
-          <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded">
-            src/App.tsx
-          </code>{" "}
-          and save to test HMR
-        </p>
-      </div>
 
-      <p className="text-gray-500 dark:text-gray-400">
-        Click on the Vite and React logos to learn more
-      </p>
+      {/* Bot Creation Component */}
+      <div className="text-center">
+        <TestBotCreation />
+      </div>
     </div>
   );
 }

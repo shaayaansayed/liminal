@@ -7,9 +7,9 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  ECR_REPOSITORY: untitled-prod
-  ECS_SERVICE: untitled-prod
-  ECS_CLUSTER: untitled-prod
+  ECR_REPOSITORY: liminal-prod
+  ECS_SERVICE: liminal-prod
+  ECS_CLUSTER: liminal-prod
 
 jobs:
   deploy:
