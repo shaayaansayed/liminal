@@ -1,0 +1,41 @@
+{
+  "name": "Reflective Conversation Demo",
+  "description": "A slower-paced conversation with thoughtful pauses and deeper reflection.",
+  "script": [
+    {
+      "delay_seconds": 3,
+      "participant_name": "Dr. Eva Rostova",
+      "text": "Let's take a moment to center ourselves. Today, I'd like us to explore what balance means to each of you."
+    },
+    {
+      "delay_seconds": 8,
+      "participant_name": "Jordan",
+      "text": "Balance... that's something I've been thinking about a lot lately. For me, it feels like this constant struggle between who I think I should be at work and who I actually am."
+    },
+    {
+      "delay_seconds": 10,
+      "participant_name": "Casey",
+      "text": "I relate to that. Sometimes I wonder if I even know what balance looks like anymore. My business has become my entire identity."
+    },
+    {
+      "delay_seconds": 6,
+      "participant_name": "Dr. Eva Rostova",
+      "text": "Those are profound observations. Can you think of a moment recently when you felt truly balanced, even if it was brief?"
+    },
+    {
+      "delay_seconds": 12,
+      "participant_name": "Jordan",
+      "text": "Actually... yes. Last Sunday morning, I was just sitting with my coffee, no phone, no laptop. Just watching the birds outside. For those few minutes, I wasn't worried about anything."
+    },
+    {
+      "delay_seconds": 8,
+      "participant_name": "Casey",
+      "text": "That sounds peaceful. I can't remember the last time I allowed myself that kind of stillness."
+    },
+    {
+      "delay_seconds": 5,
+      "participant_name": "Dr. Eva Rostova",
+      "text": "What would it take for you to create more of those moments in your life?"
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "name": "Fast-Paced Conversation Demo",
+  "description": "A scenario where participants speak quickly, leading to a 'pace_too_fast' indicator.",
+  "script": [
+    {
+      "delay_seconds": 3,
+      "participant_name": "Dr. Eva Rostova",
+      "text": "Welcome everyone. Let's pick up on our theme from last week about managing energy. Who would like to share an experience from their week related to that?"
+    },
+    {
+      "delay_seconds": 6,
+      "participant_name": "Jordan",
+      "text": "I can go. This week was rough. I had my performance review, and while my boss said I was 'meeting expectations,' all I heard was that I'm not exceeding them. I just spent the rest of the week feeling like I'm behind, that I have to work twice as hard just to keep up."
+    },
+    {
+      "delay_seconds": 3,
+      "participant_name": "Casey",
+      "text": "Ugh, performance reviews. I don't even have those, I'm my own boss, but it's like I give myself a bad review every single day. I landed a big new client, which should be great, but my first thought wasn't 'hooray,' it was 'how am I going to fit this in?'"
+    },
+    {
+      "delay_seconds": 2,
+      "participant_name": "Jordan",
+      "text": "Exactly! It's like any good news just feels like more pressure. My boss mentioned a new project and I just felt my stomach drop. It's not excitement, it's just... dread."
+    },
+    {
+      "delay_seconds": 3,
+      "participant_name": "Casey",
+      "text": "Dread is the perfect word. My heart starts racing every time I get an email notification. On Tuesday, I literally felt my eye start twitching after a three-hour client call. A twitching eye! Who am I?"
+    },
+    {
+      "delay_seconds": 2,
+      "participant_name": "Jordan",
+      "text": "Oh my god, the eye twitching, I get that too! And I haven't slept more than four hours a night this week. I lie in bed and my brain just replays every conversation, every email, looking for what I did wrong."
+    },
+    {
+      "delay_seconds": 2,
+      "participant_name": "Casey",
+      "text": "Yes! And then you're exhausted the next day so you can't focus, which makes you feel even more behind, and it's this vicious cycle. I'm living on coffee and the fear of failure."
+    },
+    {
+      "delay_seconds": 3,
+      "participant_name": "Jordan",
+      "text": "The fear of failure! That's it. It feels like if I stop running for one second, the whole thing is going to collapse. My apartment is a mess, I forgot to pay my car insurance, it's all starting to fray at the edges."
+    },
+    {
+      "delay_seconds": 2,
+      "participant_name": "Casey",
+      "text": "Fraying is right. I missed my best friend's birthday dinner because a client had a 'website emergency.' It wasn't an emergency. Now I feel like a terrible friend on top of being a stressed-out business owner."
+    },
+    {
+      "delay_seconds": 4,
+      "participant_name": "Dr. Eva Rostova",
+      "text": "Jordan, Casey, I want to pause here for a moment."
+    },
+    {
+      "delay_seconds": 5,
+      "participant_name": "Dr. Eva Rostova",
+      "text": "Thank you. I'm hearing a lot of shared feelings of being overwhelmed, and it seems to be coming out very quickly. Let's take a collective breath."
+    },
+    {
+      "delay_seconds": 8,
+      "participant_name": "Dr. Eva Rostova",
+      "text": "I want to go back to something Casey said: the 'vicious cycle.' That's a powerful image. Can we explore that piece by piece, without the pressure to solve everything at once?"
+    }
+  ]
+}
