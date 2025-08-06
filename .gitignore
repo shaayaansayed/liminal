@@ -53,3 +53,11 @@ backend/.env
 backend/.env
 !.env.example
 !**/.env.example
+
+# secrets
+.env
+.env.*
+**/.env
+backend/.env
+!.env.example
+!**/.env.example
