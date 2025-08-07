@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Audio Puppet</title>
+    <style>
+        /* Simple visual feedback for connection status */
+        body { 
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: monospace;
+            background-color: #FFC107; /* Yellow for connecting */
+            transition: background-color 0.3s ease;
+        }
+        body.connected { background-color: #4CAF50; } /* Green for connected */
+        body.disconnected { background-color: #F44336; } /* Red for disconnected */
+        #status {
+            color: white;
+            font-size: 24px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+    </style>
+</head>
+<body>
+    <div id="status">Connecting...</div>
+    <script>
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const statusDiv = document.getElementById('status');
+        let isPlaying = false;
+        let nextPlayTime = 0;
+        let audioQueue = [];
+        let isProcessing = false;
+
+        // Helper function to unlock the AudioContext
+        function unlockAudioContext(context) {
+            if (context.state !== 'suspended') return;
+            console.log('Unlocking AudioContext...');
+            const buffer = context.createBuffer(1, 1, 22050); // 1 frame, 1 channel
+            const source = context.createBufferSource();
+            source.buffer = buffer;
+            source.connect(context.destination);
+            source.start(0);
+            source.onended = () => {
+                if (context.state === 'running') {
+                    console.log('AudioContext successfully unlocked.');
+                }
+            };
+        }
+
+        // Parse URL for token and WSS address
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get('token');
+        const wss_url = params.get('wss');
+
+        if (!token || !wss_url) {
+            document.body.classList.add('disconnected');
+            statusDiv.textContent = 'Missing token or WSS URL';
+            console.error("Missing token or wss URL parameter.");
+        } else {
+            const socket = new WebSocket(`${wss_url}/ws/puppet/${token}`);
+            socket.binaryType = 'arraybuffer';
+
+            socket.onopen = () => {
+                console.log("WebSocket connection established.");
+                document.body.classList.remove('disconnected');
+                document.body.classList.add('connected');
+                statusDiv.textContent = 'Connected';
+                
+                // FIX: Proactively unlock the AudioContext for this puppet as soon as it connects.
+                unlockAudioContext(audioContext);
+            };
+
+            socket.onmessage = async (event) => {
+                try {
+                    // No longer need to check/resume context here, it's done onopen
+                    if (event.data instanceof ArrayBuffer) {
+                        audioQueue.push(event.data);
+                        processAudioQueue();
+                    } else {
+                        const message = JSON.parse(event.data);
+                        console.log('Control message:', message);
+                    }
+                } catch (error) {
+                    console.error('Error processing message:', error);
+                }
+            };
+
+            async function processAudioQueue() {
+                if (isProcessing || audioQueue.length === 0) return;
+                isProcessing = true;
+
+                while (audioQueue.length > 0) {
+                    const audioData = audioQueue.shift();
+                    await playAudioChunk(audioData);
+                }
+
+                isProcessing = false;
+            }
+
+            async function playAudioChunk(arrayBuffer) {
+                try {
+                    // For PCM data, we need to create an AudioBuffer manually
+                    // OpenAI TTS with PCM format provides 16-bit audio at 24kHz
+                    const pcmData = new Int16Array(arrayBuffer);
+                    const floatData = new Float32Array(pcmData.length);
+                    
+                    for (let i = 0; i < pcmData.length; i++) {
+                        floatData[i] = pcmData[i] / 32768.0;
+                    }
+
+                    // Create AudioBuffer
+                    const audioBuffer = audioContext.createBuffer(1, floatData.length, 24000);
+                    audioBuffer.getChannelData(0).set(floatData);
+
+                    // Create and schedule the buffer source
+                    const source = audioContext.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(audioContext.destination);
+
+                    const currentTime = audioContext.currentTime;
+                    if (currentTime < nextPlayTime) {
+                        source.start(nextPlayTime);
+                        nextPlayTime += audioBuffer.duration;
+                    } else {
+                        source.start(currentTime);
+                        nextPlayTime = currentTime + audioBuffer.duration;
+                    }
+                } catch (error) {
+                    console.error('Error playing audio chunk:', error);
+                }
+            }
+
+            socket.onclose = () => {
+                console.log("WebSocket connection closed.");
+                document.body.classList.remove('connected');
+                document.body.classList.add('disconnected');
+                statusDiv.textContent = 'Disconnected';
+            };
+
+            socket.onerror = (error) => {
+                console.error("WebSocket error:", error);
+                document.body.classList.add('disconnected');
+                statusDiv.textContent = 'Connection Error';
+            };
+
+            // Keep-alive ping every 30 seconds
+            setInterval(() => {
+                if (socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({ type: 'ping' }));
+                }
+            }, 30000);
+        }
+    </script>
+</body>
+</html>

@@ -3,6 +3,7 @@ import logging
 import asyncio
 import json
 import os
+import uuid
 from datetime import datetime, timezone
 from collections import defaultdict
 from typing import Callable, List
@@ -123,8 +124,58 @@ async def create_scribe_bot(meeting_url: str):
         return response.json()
 
 
+async def create_media_bot(meeting_url: str, bot_name: str, media_token: str, app_base_url: str):
+    """
+    Creates a bot using the output_media feature for low-latency streaming.
+    
+    Args:
+        meeting_url: The Zoom meeting URL
+        bot_name: Display name for the bot
+        media_token: Unique token for WebSocket connection
+        app_base_url: Base URL of the application (e.g., "https://myapp.com")
+    """
+    if not RECALL_API_KEY:
+        return {"error": "Missing RECALL_API_KEY"}
+
+    # Construct the puppet URL with WebSocket connection info
+    # Convert https:// to wss:// or http:// to ws://
+    wss_url = app_base_url.replace('https://', 'wss://').replace('http://', 'ws://')
+    puppet_url = f"{app_base_url}/static/puppet.html?token={media_token}&wss={wss_url}"
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"https://{RECALL_REGION}.recall.ai/api/v1/bot/",
+            headers={"Authorization": f"Token {RECALL_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "meeting_url": meeting_url,
+                "bot_name": bot_name,
+                "output_media": {
+                    "camera": {
+                        "kind": "webpage",
+                        "config": {
+                            "url": puppet_url
+                        }
+                    }
+                },
+                "variant": {
+                    "zoom": "web_4_core",
+                    "google_meet": "web_4_core",
+                    "microsoft_teams": "web_4_core"
+                }
+            },
+        )
+        if response.status_code >= 400:
+            logger.error(f"Recall API error creating media bot: {response.status_code} - {response.text}")
+            return {"error": f"Recall API error: {response.status_code}", "details": response.text}
+        return response.json()
+
+
 async def create_speaker_bot(meeting_url: str, bot_name: str):
-    """Creates a bot that can speak but does not send webhooks."""
+    """
+    Creates a bot that can speak but does not send webhooks.
+    DEPRECATED: Use create_media_bot for better latency.
+    """
+    logger.warning("create_speaker_bot is deprecated. Use create_media_bot for lower latency.")
     if not RECALL_API_KEY:
         return {"error": "Missing RECALL_API_KEY"}
 
@@ -149,6 +200,7 @@ async def create_speaker_bot(meeting_url: str, bot_name: str):
 async def send_audio_to_bot(bot_id: str, audio_data: str):
     """
     Sends base64-encoded MP3 audio data to a specific Recall bot to be played in the meeting.
+    DEPRECATED: Use create_media_bot with streaming for better latency.
     
     Args:
         bot_id: The ID of the bot to send audio to
@@ -157,6 +209,7 @@ async def send_audio_to_bot(bot_id: str, audio_data: str):
     Returns:
         Response from the Recall API or error dict
     """
+    logger.warning("send_audio_to_bot is deprecated. Use create_media_bot with streaming for lower latency.")
     if not all([RECALL_API_KEY, bot_id, audio_data]):
         return {"error": "Missing bot_id, API key, or audio data"}
 
@@ -206,13 +259,13 @@ def process_webhook(payload: dict):
     event = payload.get("event")
     
     # Save payload to a file for inspection (good for debugging)
-    # save_dir = "webhook_payloads"
-    # os.makedirs(save_dir, exist_ok=True)
-    # timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
-    # filename = f"payload_{timestamp}.json"
-    # filepath = os.path.join(save_dir, filename)
-    # with open(filepath, "w") as f:
-    #     json.dump(payload, f, indent=2)
+    save_dir = "webhook_payloads"
+    os.makedirs(save_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
+    filename = f"payload_{timestamp}.json"
+    filepath = os.path.join(save_dir, filename)
+    with open(filepath, "w") as f:
+        json.dump(payload, f, indent=2)
     
     # --- 1. Dispatch to registered callbacks ---
     # The 'participant_events.join' logic will be handled here now

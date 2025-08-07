@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+import uuid
 
 
 @dataclass
@@ -14,38 +15,72 @@ class Word:
 class TranscriptSegment:
     participant_id: str
     participant_name: str
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
     words: List[Word] = field(default_factory=list)
     is_partial: bool = False
     timestamp: datetime = field(default_factory=datetime.now)
 
 
 class TranscriptStore:
+    MERGE_THRESHOLD_SECONDS = 2.0  # Maximum gap between segments to consider merging
+    
     def __init__(self):
         self.segments: List[TranscriptSegment] = []
-        self.partial_segments: Dict[str, TranscriptSegment] = {}
+        self.active_partials: Dict[str, str] = {}  # {participant_id: segment_id}
+    
+    def add_transcript_from_webhook(self, payload: dict) -> Optional[Tuple[str, TranscriptSegment, Optional[str]]]:
+        """
+        Processes a transcript webhook payload (partial or final) and updates the store.
 
-    def add_transcript_data(self, payload: dict):
-        """Process transcript.data event (finalized transcript)"""
+        Returns:
+            A tuple of (action, segment, deleted_segment_id) or None.
+            - action: "APPEND", "UPDATE", "FINALIZE", "MERGE_UPDATE"
+            - segment: The primary TranscriptSegment that was affected.
+            - deleted_segment_id: The ID of a segment that was consumed by a merge.
+        """
+        event_type = payload.get("event")
+        data = payload.get("data", {}).get("data", {})
+        participant = data.get("participant", {})
+        words_data = data.get("words", [])
+
+        if not participant.get("id") or not words_data:
+            return None
+
+        participant_id = str(participant["id"])
+        participant_name = participant.get("name", "Unknown")
+
+        new_words = [
+            Word(
+                text=w.get("text", ""),
+                start_timestamp=w.get("start_timestamp", {}).get("relative", 0.0),
+                end_timestamp=w.get("end_timestamp", {}).get("relative") if w.get("end_timestamp") else None,
+            )
+            for w in words_data
+        ]
+
+        if event_type == "transcript.partial_data":
+            return self._handle_partial_transcript(participant_id, participant_name, new_words)
+        elif event_type == "transcript.data":
+            return self._handle_final_transcript(participant_id, participant_name, new_words)
+        
+        return None
+
+    def add_transcript_data(self, payload: dict) -> Tuple[str, TranscriptSegment]:
+        """
+        Process transcript.data event (finalized transcript).
+        
+        Returns:
+            Tuple of (action_type, segment) where action_type is "MERGED" or "APPENDED"
+        """
         data = payload.get("data", {}).get("data", {})
         participant = data.get("participant", {})
         words = data.get("words", [])
 
         if not participant.get("id") or not words:
-            return
+            return None
 
-        # Convert partial segment to final if exists
-        participant_id = str(participant["id"])
-        if participant_id in self.partial_segments:
-            segment = self.partial_segments.pop(participant_id)
-            segment.is_partial = False
-        else:
-            segment = TranscriptSegment(
-                participant_id=participant_id,
-                participant_name=participant.get("name", "Unknown"),
-                is_partial=False,
-            )
-
-        # Add words to segment
+        # Parse the new words
+        new_words = []
         for word_data in words:
             word = Word(
                 text=word_data.get("text", ""),
@@ -56,70 +91,162 @@ class TranscriptStore:
                 if word_data.get("end_timestamp")
                 else None,
             )
-            segment.words.append(word)
-
-        self.segments.append(segment)
-
-    def add_partial_transcript_data(self, payload: dict):
-        """Process transcript.partial_data event (interim transcript)"""
-        data = payload.get("data", {}).get("data", {})
-        participant = data.get("participant", {})
-        words = data.get("words", [])
-
-        if not participant.get("id") or not words:
-            return
+            new_words.append(word)
 
         participant_id = str(participant["id"])
-
-        # Create or update partial segment
+        participant_name = participant.get("name", "Unknown")
+        
+        # Check if we should merge with the last segment
+        if self.segments and new_words:
+            last_segment = self.segments[-1]
+            
+            # Check merge criteria
+            same_speaker = last_segment.participant_id == participant_id
+            
+            if same_speaker and last_segment.words and new_words[0].start_timestamp is not None:
+                last_word_end = (last_segment.words[-1].end_timestamp or 
+                               last_segment.words[-1].start_timestamp)
+                time_gap = new_words[0].start_timestamp - last_word_end
+                
+                # If both criteria are met, merge
+                if time_gap <= self.MERGE_THRESHOLD_SECONDS:
+                    # Merge the words
+                    last_segment.words.extend(new_words)
+                    return ("MERGED", last_segment)
+        
+        # If we're not merging, create a new segment
         segment = TranscriptSegment(
             participant_id=participant_id,
-            participant_name=participant.get("name", "Unknown"),
+            participant_name=participant_name,
+            words=new_words,
+            is_partial=False,
+        )
+        
+        self.segments.append(segment)
+        return ("APPENDED", segment)
+    
+    def _handle_partial_transcript(self, participant_id: str, participant_name: str, words: List[Word]) -> Tuple[str, TranscriptSegment, None]:
+        """Handle partial transcript updates"""
+        active_segment_id = self.active_partials.get(participant_id)
+
+        if active_segment_id:
+            # We have an active partial for this speaker, update it.
+            try:
+                # Find the segment to update. It should be the last one, but searching is safer.
+                segment_to_update = next(s for s in reversed(self.segments) if s.id == active_segment_id)
+                segment_to_update.words = words
+                segment_to_update.timestamp = datetime.now()
+                return "UPDATE", segment_to_update, None
+            except StopIteration:
+                # This case is unlikely but means our state is inconsistent.
+                # We'll treat it as a new partial.
+                pass
+
+        # No active partial for this speaker, create a new one.
+        new_segment = TranscriptSegment(
+            participant_id=participant_id,
+            participant_name=participant_name,
+            words=words,
             is_partial=True,
         )
+        self.segments.append(new_segment)
+        self.active_partials[participant_id] = new_segment.id
+        return "APPEND", new_segment, None
+    
+    def _handle_final_transcript(self, participant_id: str, participant_name: str, words: List[Word]) -> Tuple[str, TranscriptSegment, Optional[str]]:
+        """Handle final transcript data"""
+        active_segment_id = self.active_partials.get(participant_id)
+        deleted_segment_id = None
 
-        # Add words
-        for word_data in words:
-            word = Word(
-                text=word_data.get("text", ""),
-                start_timestamp=word_data.get("start_timestamp", {}).get(
-                    "relative", 0.0
-                ),
-                end_timestamp=word_data.get("end_timestamp", {}).get("relative")
-                if word_data.get("end_timestamp")
-                else None,
-            )
-            segment.words.append(word)
+        if active_segment_id:
+            # This final transcript corresponds to a stream of partials we've been tracking.
+            try:
+                # Find the partial segment to finalize.
+                segment_to_finalize = next(s for s in reversed(self.segments) if s.id == active_segment_id)
+                segment_to_finalize.words = words
+                segment_to_finalize.is_partial = False
+                segment_to_finalize.timestamp = datetime.now()
+                
+                # Clean up the active partial tracking.
+                del self.active_partials[participant_id]
 
-        self.partial_segments[participant_id] = segment
+                # Now, attempt to merge this newly finalized segment into the one before it.
+                merged_segment, deleted_id = self._attempt_merge_with_previous(segment_to_finalize)
+                if merged_segment:
+                    return "MERGE_UPDATE", merged_segment, deleted_id
+                
+                # If no merge, just signal that the segment is now final.
+                return "FINALIZE", segment_to_finalize, None
+
+            except StopIteration:
+                pass # Fall through to create a new final segment.
+        
+        # This is a standalone final transcript with no preceding partials.
+        new_final_segment = TranscriptSegment(
+            participant_id=participant_id,
+            participant_name=participant_name,
+            words=words,
+            is_partial=False,
+        )
+
+        # Attempt to merge this new segment into the previous one.
+        merged_segment, deleted_id = self._attempt_merge_with_previous(new_final_segment)
+        if merged_segment:
+            # The new segment was consumed by the merge, so we don't append it.
+            # The deleted_id here will be the ID of the new_final_segment that was never truly added.
+            return "MERGE_UPDATE", merged_segment, new_final_segment.id
+
+        # No merge occurred, so append it as a new final segment.
+        self.segments.append(new_final_segment)
+        return "APPEND", new_final_segment, None
+    
+    def _attempt_merge_with_previous(self, current_segment: TranscriptSegment) -> Tuple[Optional[TranscriptSegment], Optional[str]]:
+        """
+        Checks if the current_segment can be merged with the last final segment in the store.
+        If it can, it performs the merge and removes the current_segment from the list.
+        
+        Returns: (merged_segment, deleted_segment_id) if merge happened, else (None, None).
+        """
+        # Find the last non-partial segment to merge with.
+        last_final_segment = None
+        for segment in reversed(self.segments):
+            if not segment.is_partial and segment != current_segment:
+                last_final_segment = segment
+                break
+                
+        if not last_final_segment or not last_final_segment.words:
+            return None, None
+
+        # Check merge criteria
+        same_speaker = last_final_segment.participant_id == current_segment.participant_id
+        if same_speaker and current_segment.words:
+            last_word_end = (last_final_segment.words[-1].end_timestamp or
+                             last_final_segment.words[-1].start_timestamp)
+            
+            time_gap = current_segment.words[0].start_timestamp - last_word_end
+            
+            if 0 <= time_gap <= self.MERGE_THRESHOLD_SECONDS:
+                # Perform the merge
+                last_final_segment.words.extend(current_segment.words)
+                
+                # If current_segment is already in the list, remove it.
+                if current_segment in self.segments:
+                    self.segments.remove(current_segment)
+                
+                return last_final_segment, current_segment.id
+
+        return None, None
+
 
     def get_full_transcript(self) -> List[dict]:
-        """Get the complete transcript including partial segments"""
+        """Get the complete transcript"""
         transcript = []
 
         # Add all finalized segments
         for segment in self.segments:
             transcript.append(
                 {
-                    "participant_id": segment.participant_id,
-                    "participant_name": segment.participant_name,
-                    "is_partial": segment.is_partial,
-                    "words": [
-                        {
-                            "text": word.text,
-                            "start_timestamp": word.start_timestamp,
-                            "end_timestamp": word.end_timestamp,
-                        }
-                        for word in segment.words
-                    ],
-                    "timestamp": segment.timestamp.isoformat(),
-                }
-            )
-
-        # Add current partial segments
-        for segment in self.partial_segments.values():
-            transcript.append(
-                {
+                    "id": segment.id,
                     "participant_id": segment.participant_id,
                     "participant_name": segment.participant_name,
                     "is_partial": segment.is_partial,
@@ -241,7 +368,7 @@ class TranscriptStore:
     def clear(self):
         """Clear all transcript data"""
         self.segments.clear()
-        self.partial_segments.clear()
+        self.active_partials.clear()
 
 
 transcript_store = TranscriptStore()

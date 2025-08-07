@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react'
 
 interface TranscriptionEntry {
-  id: number
+  id: string
   speaker: string
   text: string
   timestamp: string

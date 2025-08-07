@@ -97,6 +97,36 @@ class OpenAIService:
             logger.error(f"Error generating speech: {e}")
             return None
 
+    async def generate_speech_stream(self, text: str, voice: str = "alloy"):
+        """
+        Generates speech from text using OpenAI's TTS API and yields audio chunks.
+        
+        Args:
+            text: The text to convert to speech
+            voice: The TTS voice to use (e.g., "alloy", "nova", "fable")
+            
+        Yields:
+            bytes: Raw PCM audio chunks for streaming
+        """
+        if not self.client:
+            logger.error("OpenAI client not initialized")
+            return
+
+        try:
+            # Use PCM format for lower latency streaming
+            response = await self.client.audio.speech.create(
+                model="tts-1",
+                voice=voice,
+                input=text,
+                response_format="pcm"  # 16-bit PCM at 24kHz
+            )
+            
+            async for chunk in await response.aiter_bytes():
+                yield chunk
+                
+        except Exception as e:
+            logger.error(f"Error generating speech stream: {e}")
+
 
 # Create a singleton instance
 openai_service = OpenAIService()

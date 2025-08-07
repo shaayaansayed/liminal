@@ -24,6 +24,9 @@ class Settings:
     # Indicator observability configuration
     INDICATOR_OBSERVABILITY_ENABLED = os.getenv("INDICATOR_OBSERVABILITY_ENABLED", "false").lower() == "true"
     INDICATOR_LOG_PATH = os.getenv("INDICATOR_LOG_PATH", "observability_logs")
+    
+    # Application base URL for webhooks and media streaming
+    APP_BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8000")
 
 
 # Create settings instance

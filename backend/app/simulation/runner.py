@@ -1,15 +1,16 @@
 # backend/app/simulation/runner.py
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Dict
 
 # Internal Application Imports
-from app.api.websockets import manager
+from app.api.websockets import manager, puppet_manager
 from app.services.recall_service import (
     create_scribe_bot,
     create_speaker_bot,
-    send_audio_to_bot,
+    create_media_bot,
     register_event_callback,
     unregister_event_callback
 )
@@ -19,6 +20,7 @@ from app.simulation import engine
 from app.simulation.agents import ALL_AGENTS
 from app.simulation.zoom_turnflow import MEETING, TurnPhase, turnflow_monitor
 from app.indicators.observability import indicator_logger
+from app.core.config import settings
 
 # Create service instance
 openai_service = OpenAIService()
@@ -139,12 +141,21 @@ async def run_zoom_simulation_loop(meeting_url: str, turn_provider=None):
     monitor_task = asyncio.create_task(turnflow_monitor())
     
     try:
-        # --- 4. Create Speaker Bots using LOCAL state ---
+        # --- 4. Create Media Bots using streaming architecture ---
         speaker_bots = []
+        agent_to_token_map = {}
         tasks_to_wait_for = []
+        
+        # Dictionary to track WebSocket connections for puppets
+        puppet_connected_events: Dict[str, asyncio.Event] = {}
+        
+        # Pass this to the puppet manager so it knows about the events to set
+        puppet_manager.set_event_dict(puppet_connected_events)
 
         for agent in ALL_AGENTS:
             bot_name = f"Sim-{agent['name']}"
+            media_token = str(uuid.uuid4())  # Generate unique token for WebSocket
+            agent_to_token_map[agent['name']] = media_token
             
             # Create an asyncio Event that the webhook will trigger
             join_event = asyncio.Event()
@@ -152,24 +163,29 @@ async def run_zoom_simulation_loop(meeting_url: str, turn_provider=None):
             bots_to_join_events[bot_name] = join_event
             tasks_to_wait_for.append(join_event.wait())
             
-            logger.info(f"Creating speaker bot: {bot_name}")
+            # Create event for puppet WebSocket connection
+            puppet_connected_events[media_token] = asyncio.Event()
+            
+            logger.info(f"Creating media bot: {bot_name} with token: {media_token}")
             try:
-                response = await create_speaker_bot(meeting_url, bot_name)
+                # Use the new create_media_bot function for low-latency streaming
+                response = await create_media_bot(meeting_url, bot_name, media_token, settings.APP_BASE_URL)
                 bot_id = response.get("id")
                 if bot_id:
                     speaker_bots.append({
                         "id": bot_id,
-                        "agent": agent
+                        "agent": agent,
+                        "token": media_token
                     })
-                    logger.info(f"Speaker bot '{bot_name}' is being created with ID: {bot_id}")
+                    logger.info(f"Media bot '{bot_name}' is being created with ID: {bot_id}")
                 else:
-                    logger.error(f"Failed to create speaker bot: {bot_name}. Details: {response}")
+                    logger.error(f"Failed to create media bot: {bot_name}. Details: {response}")
                     # If creation fails, remove the corresponding wait task
                     tasks_to_wait_for.pop()
                     bots_to_join_events.pop(bot_name, None)
 
             except Exception as e:
-                logger.error(f"Exception creating speaker bot {bot_name}: {str(e)}")
+                logger.error(f"Exception creating media bot {bot_name}: {str(e)}")
                 tasks_to_wait_for.pop()
                 bots_to_join_events.pop(bot_name, None)
 
@@ -180,10 +196,12 @@ async def run_zoom_simulation_loop(meeting_url: str, turn_provider=None):
         # --- 5. Wait for all Speaker Bots to join the meeting ---
         logger.info(f"Waiting for {len(tasks_to_wait_for)} speaker bot(s) to join...")
         await asyncio.wait_for(asyncio.gather(*tasks_to_wait_for), timeout=180.0)
-        logger.info(" All speaker bots have joined the meeting. Starting conversation.")
+        logger.info("Waiting for puppets to establish WebSocket connections...")
+        connection_wait_tasks = [event.wait() for event in puppet_connected_events.values()]
+        await asyncio.wait_for(asyncio.gather(*connection_wait_tasks), timeout=60.0) # 60s timeout
+        logger.info("All speaker bots have joined the meeting. Starting conversation.")
 
         # --- 6. Run the main conversation loop ---
-        agent_to_bot_id = {bot['agent']['name']: bot['id'] for bot in speaker_bots}
         while True:
             # Wait until the room has been quiet long enough
             while MEETING.phase is not TurnPhase.READY:
@@ -198,19 +216,25 @@ async def run_zoom_simulation_loop(meeting_url: str, turn_provider=None):
                 # NOTE: We don't broadcast here - the actual transcription will come through webhooks
                 # This prevents duplicate messages in the UI
                 
-                # Pass the agent's voice to generate_speech
-                audio_data = await openai_service.generate_speech(text, voice=agent['voice'])
-                bot_id = agent_to_bot_id.get(agent['name'])
+                # Get the media token for this agent
+                media_token = agent_to_token_map.get(agent['name'])
                 
-                if audio_data and bot_id:
-                    speak_response = await send_audio_to_bot(bot_id, audio_data)
-                    if speak_response and speak_response.get("error"):
-                        logger.error(f"Failed to send audio for {agent['name']}: {speak_response.get('error')} - {speak_response.get('details', '')}")
-                    else:
-                        logger.info(f"Audio sent to bot {agent['name']}. Phase -> PLAYING")
-                        MEETING.phase = TurnPhase.PLAYING
+                if media_token:
+                    logger.info(f"Streaming audio for {agent['name']} via WebSocket token: {media_token}")
+                    MEETING.phase = TurnPhase.PLAYING
+                    
+                    try:
+                        # Stream audio chunks directly to the puppet via WebSocket
+                        chunk_count = 0
+                        async for audio_chunk in openai_service.generate_speech_stream(text, voice=agent['voice']):
+                            await puppet_manager.send_audio(media_token, audio_chunk)
+                            chunk_count += 1
+                        
+                        logger.info(f"Streamed {chunk_count} audio chunks for {agent['name']}")
+                    except Exception as e:
+                        logger.error(f"Error streaming audio for {agent['name']}: {str(e)}")
                 else:
-                    logger.warning(f"Could not send audio for {agent['name']}. Missing audio data or bot ID.")
+                    logger.warning(f"No media token found for agent {agent['name']}")
             else:
                 # No more turns available (could be end of demo)
                 logger.info("No message generated in simulation turn - simulation may be complete")

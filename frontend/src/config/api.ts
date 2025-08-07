@@ -12,9 +12,9 @@ export interface TranscriptWord {
 }
 
 export interface TranscriptSegment {
+  id: string;
   participant_id: string;
   participant_name: string;
-  is_partial: boolean;
   words: TranscriptWord[];
   timestamp: string;
 }

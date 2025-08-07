@@ -27,15 +27,15 @@ interface TranscriptWord {
 }
 
 interface TranscriptSegment {
+  id: string
   participant_id: string
   participant_name: string
-  is_partial: boolean
   words: TranscriptWord[]
   timestamp: string
 }
 
 interface TranscriptionEntry {
-  id: number
+  id: string
   speaker: string
   text: string
   timestamp: string
@@ -49,7 +49,6 @@ const MonitoringInterface: React.FC<MonitoringInterfaceProps> = ({ zoomUrl, sess
   const [wsStatus, setWsStatus] = useState<string>("Disconnected")
   const [isLoadingTranscript, setIsLoadingTranscript] = useState(false)
   const ws = useRef<WebSocket | null>(null)
-  const transcriptIdCounter = useRef(0)
 
   // Fetch existing transcript on mount
   useEffect(() => {
@@ -82,11 +81,10 @@ const MonitoringInterface: React.FC<MonitoringInterfaceProps> = ({ zoomUrl, sess
         : segment.timestamp
       
       return {
-        id: transcriptIdCounter.current++,
+        id: segment.id,
         speaker: segment.participant_name,
         text: text,
-        timestamp: timestamp,
-        isPartial: segment.is_partial
+        timestamp: timestamp
       }
     })
   }
@@ -138,42 +136,87 @@ const MonitoringInterface: React.FC<MonitoringInterfaceProps> = ({ zoomUrl, sess
             
             setAlerts(prev => [...prev, newAlert]);
             console.log('Silence alert added:', newAlert);
-          } else if (message.type === 'transcript_update') {
-            // Handle real-time transcript updates
+          } else if (message.type === 'transcript_segment_append') {
+            // Handle new transcript segments
+            const segment = message.data;
             const newTranscription: TranscriptionEntry = {
-              id: transcriptIdCounter.current++,
-              speaker: message.participant || 'Unknown',
-              text: message.text || '',
-              timestamp: new Date().toISOString(),
-              isPartial: message.event === 'partial'
+              id: segment.id,
+              speaker: segment.participant_name,
+              text: segment.text || '',
+              timestamp: segment.timestamp,
+              isPartial: segment.is_partial
             };
             
-            if (message.event === 'partial') {
-              // For partial updates, replace the last partial entry from the same speaker
-              setTranscription(prev => {
-                const lastIndex = prev.findLastIndex(
-                  entry => entry.speaker === newTranscription.speaker && entry.isPartial
-                );
-                
-                if (lastIndex >= 0) {
-                  const updated = [...prev];
-                  updated[lastIndex] = newTranscription;
-                  return updated;
-                }
-                
-                return [...prev, newTranscription];
-              });
-            } else {
-              // For final updates, remove any partial entries from the same speaker and add the final
-              setTranscription(prev => {
-                const filtered = prev.filter(
-                  entry => !(entry.speaker === newTranscription.speaker && entry.isPartial)
-                );
-                return [...filtered, newTranscription];
-              });
-            }
+            setTranscription(prev => [...prev, newTranscription]);
+            console.log('Transcript segment appended:', newTranscription);
+          } else if (message.type === 'transcript_segment_update') {
+            // Handle updated transcript segments (merged)
+            const segment = message.data;
+            setTranscription(prev => {
+              const index = prev.findIndex(entry => entry.id === segment.id);
+              if (index >= 0) {
+                const updated = [...prev];
+                updated[index] = {
+                  id: segment.id,
+                  speaker: segment.participant_name,
+                  text: segment.text || '',
+                  timestamp: segment.timestamp,
+                  isPartial: segment.is_partial
+                };
+                return updated;
+              }
+              // If not found, append it (shouldn't happen but be safe)
+              return [...prev, {
+                id: segment.id,
+                speaker: segment.participant_name,
+                text: segment.text || '',
+                timestamp: segment.timestamp,
+                isPartial: segment.is_partial
+              }];
+            });
+            console.log('Transcript segment updated:', segment.id);
+          } else if (message.type === 'transcript_segment_finalize') {
+            // Handle finalized transcript segments (partial -> final)
+            const segment = message.data;
+            setTranscription(prev => {
+              const index = prev.findIndex(entry => entry.id === segment.id);
+              if (index >= 0) {
+                const updated = [...prev];
+                updated[index] = {
+                  id: segment.id,
+                  speaker: segment.participant_name,
+                  text: segment.text || '',
+                  timestamp: segment.timestamp,
+                  isPartial: segment.is_partial
+                };
+                return updated;
+              }
+              return prev;
+            });
+            console.log('Transcript segment finalized:', segment.id);
+          } else if (message.type === 'transcript_segment_merge_update') {
+            // Handle merged transcript segments
+            const segment = message.data;
+            const deletedId = segment.deleted_segment_id;
             
-            console.log('Transcription added:', newTranscription);
+            setTranscription(prev => {
+              // First, remove the deleted segment if it exists
+              let updated = deletedId ? prev.filter(entry => entry.id !== deletedId) : prev;
+              
+              // Then update the merged segment
+              const index = updated.findIndex(entry => entry.id === segment.id);
+              if (index >= 0) {
+                updated[index] = {
+                  id: segment.id,
+                  speaker: segment.participant_name,
+                  text: segment.text || '',
+                  timestamp: segment.timestamp,
+                  isPartial: segment.is_partial
+                };
+              }
+              return updated;
+            });
+            console.log('Transcript segments merged:', segment.id, 'deleted:', deletedId);
           } else if (message.type === 'participant_event') {
             // Handle participant events
             const alertMessage = message.event === 'join' 

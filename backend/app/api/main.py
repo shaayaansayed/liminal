@@ -3,6 +3,7 @@ Main FastAPI application module.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.core.config import CORS_ORIGINS
 from app.api.routes import session, webhooks, health, transcript
@@ -30,5 +31,9 @@ app.include_router(session.router)
 app.include_router(webhooks.router)
 app.include_router(transcript.router)
 
-# Add WebSocket endpoint
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Add WebSocket endpoints
 app.add_api_websocket_route("/ws/alerts", websockets.websocket_endpoint)
+app.add_api_websocket_route("/ws/puppet/{token}", websockets.puppet_websocket_endpoint)

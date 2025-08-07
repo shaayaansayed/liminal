@@ -11,11 +11,23 @@ class IndicatorDefinition(TypedDict):
 # The prompt is carefully worded to elicit a structured "yes/no" response.
 PACE_TOO_FAST_PROMPT = """You are a therapist observing a group session.
 Your task is to determine if the conversation pace has been too fast in the last {window_seconds} seconds.
-Consider factors like rapid speaking rate, quick topic shifts without resolution, or participants talking over each other.
+
+IMPORTANT - Transcript Reliability:
+- Transcripts may contain ASR and diarization errors (misheard words, duplicated tokens, incorrect speaker labels, missing punctuation). Do not treat these as evidence of speaking pace.
+- Ignore apparent cross-talk/overlap (e.g., '[crosstalk]', interleaved sentences, simultaneous utterances). Do NOT use overlap as a signal for 'too fast'.
+- Discount these ASR artifacts: duplicated words, partial words, filler expansions ("um, uh"), timestamp drift, and hallucinated interjections.
+- Pure overlap frequency or interleaving alone should NOT be considered as evidence of fast pace.
+
+Focus on substantive indicators:
+- Consider rapid topic shifts without resolution
+- Look for incomplete thoughts or ideas being abandoned
+- Notice if participants don't have time to fully express themselves
+- Evaluate if the conversation moves on before understanding is achieved
+
 Answer with only "yes" or "no", followed by a comma and a brief rationale.
 
-Example: yes, the topic shifted from work to family matters very quickly.
-Example: no, the conversation pace is appropriate.
+Example: yes, the topic shifted from work to family matters without resolving the work concerns.
+Example: no, the conversation pace allows participants to complete their thoughts.
 
 Transcript:
 <<<
